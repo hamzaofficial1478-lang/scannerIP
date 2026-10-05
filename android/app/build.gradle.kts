@@ -4,6 +4,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Every GitHub build gets the next run number, so a phone can tell which build
+// is newer. Local builds are 1.0-dev. The in-app updater fetches new builds
+// from this repository's "latest" release.
+val runNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()
+val updateRepo = providers.environmentVariable("GITHUB_REPOSITORY").orNull ?: "hamzaofficial1478-lang/scannerIP"
+
 android {
     namespace = "io.github.scannerip.app"
     // tor-android 0.4.9.13 is built against Android 17 (API 37.1).
@@ -16,10 +22,11 @@ android {
         minSdk = 26
         // Kept at 36 on purpose: Android 17 behaviour changes haven't been tested on a real phone yet.
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
-        // Real phones (64 and 32-bit ARM) plus x86_64 for the Android emulator.
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        versionCode = runNumber ?: 1
+        versionName = if (runNumber != null) "1.0.$runNumber" else "1.0-dev"
+        buildConfigField("String", "UPDATE_URL", "\"https://github.com/$updateRepo/releases/download/latest/\"")
+        // Real phones: 64-bit ARM, plus 32-bit ARM for budget phones running Android Go.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -35,6 +42,10 @@ android {
     }
 
     buildTypes {
+        // Debug builds also run on the Android emulator on a PC.
+        debug {
+            ndk { abiFilters += "x86_64" }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -50,6 +61,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -65,10 +77,15 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Store Tor and the decoder compressed. Uncompressed they made a 30 MB
+        // download, which slow mobile data and some phone browsers choked on.
+        // Android unpacks them once at install time instead.
+        jniLibs.useLegacyPackaging = true
     }
 
     lint {
         disable += "OldTargetApi" // see targetSdk above
+        disable += "ChromeOsAbiSupport" // phones only; Chromebooks translate ARM anyway
         warningsAsErrors = true
         abortOnError = true
     }
@@ -80,6 +97,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.process)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
@@ -91,6 +109,7 @@ dependencies {
     implementation(libs.camera.view)
     implementation(libs.zxing.cpp)
     implementation(libs.tor.android)
+    implementation(libs.work.runtime)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 
@@ -98,4 +117,6 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.work.testing)
+    testImplementation(libs.okhttp.mockwebserver)
 }

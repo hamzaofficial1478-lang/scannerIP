@@ -19,6 +19,7 @@ import io.github.scannerip.core.Report
 import io.github.scannerip.core.RotationError
 import io.github.scannerip.core.RotationEvent
 import io.github.scannerip.core.Rotator
+import io.github.scannerip.core.Route
 import io.github.scannerip.core.ScanEntry
 import io.github.scannerip.core.ScanLog
 import io.github.scannerip.core.Shield
@@ -118,6 +119,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages
 
+    private val updater = (app as ScannerIpApplication).updater
+    val updates: StateFlow<UpdateState> = updater.state
+    val appVersion: String get() = updater.installedVersionName
+    private val _backgroundUpdates = MutableStateFlow(updater.backgroundChecks)
+    val backgroundUpdates: StateFlow<Boolean> = _backgroundUpdates
+    @Volatile private var autoChecked = false
+
     @Volatile private var vault: IdentityVault? = null
     @Volatile private var shieldRunner: Shield? = null
     @Volatile private var generation = 0
@@ -136,6 +144,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(logQueue) {
             _history.value = scanLog.readAll().asReversed()
+        }
+        try {
+            updater.schedule()
+        } catch (_: IllegalStateException) {
+            // WorkManager isn't set up (only happens in some unit tests); the in-app check still works.
         }
         viewModelScope.launch {
             while (true) {
@@ -264,6 +277,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         vault?.let { _layers.value = it.layers() }
+        // First working connection this session: quietly see if there's a newer build.
+        if (!autoChecked) {
+            autoChecked = true
+            // On IO: route() waits for any shift in progress, which mustn't block the screen.
+            viewModelScope.launch(Dispatchers.IO) { updater.check(if (rotator.anonymous) shieldRunner?.route() else null) }
+        }
     }
 
     private fun stopShield() {
@@ -365,6 +384,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissInspection() {
         _inspection.value = InspectUi.Idle
     }
+
+    // ---------- updates ----------
+
+    /**
+     * Update traffic goes through the shield like everything else, so in a Tor or
+     * proxy mode it waits until the shield is up. Demo mode isn't hiding the IP
+     * anyway, so there it goes straight out.
+     */
+    private fun withUpdateRoute(action: suspend (Route?) -> Unit) {
+        val state = _shield.value
+        val runner = shieldRunner
+        if (state.mode.anonymous && (runner == null || !state.canInspect)) {
+            _messages.tryEmit("Updates come through the shield too, so wait a moment for it to connect.")
+            return
+        }
+        viewModelScope.launch {
+            val route = if (state.mode.anonymous) withContext(Dispatchers.IO) { runner?.route() } else null
+            action(route)
+        }
+    }
+
+    fun checkForUpdates() {
+        withUpdateRoute { route ->
+            updater.check(route)
+            if (updater.state.value == UpdateState.UpToDate) _messages.emit("You've got the newest version ($appVersion).")
+        }
+    }
+
+    fun installUpdate() {
+        withUpdateRoute { route -> updater.downloadAndInstall(route) }
+    }
+
+    fun setBackgroundUpdates(on: Boolean) {
+        _backgroundUpdates.value = on
+        try {
+            updater.setBackgroundChecks(on)
+        } catch (_: IllegalStateException) {
+            // see init
+        }
+    }
+
+    /** Android 13+ needs permission for notifications; ask once, the first time the app opens. */
+    fun shouldAskForNotifications(): Boolean =
+        android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("asked_notifications", false)
+
+    fun notificationsAsked() = prefs.edit { putBoolean("asked_notifications", true) }
 
     // ---------- IDs and history ----------
 

@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import io.github.scannerip.core.Shield
 import io.github.scannerip.core.SimulatedRotator
 import io.github.scannerip.core.SoftwareKeys
 import io.github.scannerip.core.analyseText
+import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -159,6 +161,22 @@ class ScreenshotTest {
     }
 
     @Test
+    fun updateBannerAndCard() {
+        val info = io.github.scannerip.core.UpdateInfo(12, "1.0.12", "a".repeat(64), "Faster scanning and a clearer Shield tab")
+        shoot("6-updates") {
+            UpdateBanner(io.github.scannerip.app.UpdateState.Available(info), onUpdate = {})
+            UpdateBanner(io.github.scannerip.app.UpdateState.Downloading(info, 0.45f), onUpdate = {})
+            Column(Modifier.padding(16.dp)) {
+                UpdatesCard("1.0.5", io.github.scannerip.app.UpdateState.Available(info), backgroundChecks = true,
+                    onCheck = {}, onBackgroundChecks = {})
+            }
+        }
+        compose.onNodeWithText("Update now").assertExists()
+        compose.onNodeWithText("Downloading 45% through the shield...").assertExists()
+        compose.onNodeWithText("You have ScannerIP 1.0.5").assertExists()
+    }
+
+    @Test
     fun idsScreen() {
         shoot("4-ids") {
             IdsScreen(vault.layers(), vault.keyDescription) {}
@@ -200,6 +218,7 @@ class FullAppScreenshotTest {
     fun clickThroughTheApp() {
         val app = ApplicationProvider.getApplicationContext<ScannerIpApplication>()
         app.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("mode", ShieldMode.DEMO.name).commit()
+        app.useUpdater(io.github.scannerip.app.AppUpdater(app, "http://127.0.0.1:9/", 1, "1.0-test")) // no real GitHub
         val store = ViewModelStore()
         val vm = ViewModelProvider(store, ViewModelProvider.AndroidViewModelFactory(app))[AppViewModel::class.java]
         compose.setContent { ScannerIpTheme(dark = false) { ScannerIpApp(vm) } }

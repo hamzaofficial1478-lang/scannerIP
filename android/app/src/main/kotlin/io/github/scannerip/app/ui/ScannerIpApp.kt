@@ -84,6 +84,8 @@ fun ScannerIpApp(vm: AppViewModel) {
     val history by vm.history.collectAsStateWithLifecycle()
     val inspection by vm.inspection.collectAsStateWithLifecycle()
     val codesInView by vm.codesInView.collectAsStateWithLifecycle()
+    val updates by vm.updates.collectAsStateWithLifecycle()
+    val backgroundUpdates by vm.backgroundUpdates.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableStateOf(Tab.SCAN) }
     var torchOn by rememberSaveable { mutableStateOf(false) }
@@ -97,6 +99,13 @@ fun ScannerIpApp(vm: AppViewModel) {
         uri?.let(vm::decodeImage)
     }
 
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        if (vm.shouldAskForNotifications()) {
+            vm.notificationsAsked()
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(lastScan?.id) { if (lastScan != null) haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
 
@@ -110,7 +119,12 @@ fun ScannerIpApp(vm: AppViewModel) {
     val inspecting = inspection is InspectUi.Running
 
     Scaffold(
-        topBar = { TopBar(shield) },
+        topBar = {
+            Column {
+                TopBar(shield)
+                UpdateBanner(updates, onUpdate = vm::installUpdate)
+            }
+        },
         bottomBar = {
             NavigationBar {
                 Tab.entries.forEach { t ->
@@ -159,6 +173,10 @@ fun ScannerIpApp(vm: AppViewModel) {
                     onProxyText = vm::setProxyText,
                     onStartOrbot = vm::startOrbot,
                     onGetOrbot = { openStore(context) },
+                    footer = {
+                        UpdatesCard(vm.appVersion, updates, backgroundUpdates,
+                            onCheck = vm::checkForUpdates, onBackgroundChecks = vm::setBackgroundUpdates)
+                    },
                 )
                 Tab.IDS -> IdsScreen(layers, vm.keyDescription, vm::verifySeal)
                 Tab.HISTORY -> HistoryScreen(

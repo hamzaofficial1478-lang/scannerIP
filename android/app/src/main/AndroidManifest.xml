@@ -4,6 +4,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- In-app updates: install the new build of ScannerIP itself, tell you when one is out. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <!-- So we can tell whether Orbot is installed (package visibility, Android 11+). -->
@@ -34,6 +38,11 @@
             android:name="org.torproject.jni.TorService"
             android:exported="false"
             tools:node="merge" />
+
+        <!-- Hears back from Android's installer during an update. -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

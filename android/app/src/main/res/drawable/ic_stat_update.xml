@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification icon: a shield with a down arrow (white on transparent, as Android expects). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2 L20,5 L20,11 C20,16 16.6,20.4 12,22 C7.4,20.4 4,16 4,11 L4,5 Z M11,7 L11,12.6 L8.7,10.3 L7.3,11.7 L12,16.4 L16.7,11.7 L15.3,10.3 L13,12.6 L13,7 Z" />
+</vector>

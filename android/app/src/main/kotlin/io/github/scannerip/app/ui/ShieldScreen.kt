@@ -51,6 +51,7 @@ fun ShieldScreen(
     onProxyText: (String) -> Unit,
     onStartOrbot: () -> Unit,
     onGetOrbot: () -> Unit,
+    footer: @Composable () -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -142,6 +143,8 @@ fun ShieldScreen(
                 }
             }
         }
+
+        footer()
     }
 }
 
