@@ -24,12 +24,26 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.1" "build-tools;37.0.0" > /dev/null
       - name: Tests, lint and the release APK
         run: ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --console=plain
-      - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk ScannerIP.apk
+      # The build numbers itself from GITHUB_RUN_NUMBER (see app/build.gradle.kts).
+      # version.json tells phones which build this is and its SHA-256 fingerprint,
+      # so the in-app updater can check the download before installing it.
+      - name: Name the APK and describe it
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk ScannerIP.apk
+          jq -n \
+            --argjson code "$GITHUB_RUN_NUMBER" \
+            --arg name "1.0.$GITHUB_RUN_NUMBER" \
+            --arg sha "$(sha256sum ScannerIP.apk | cut -d' ' -f1)" \
+            --arg notes "$(git log -1 --pretty=%b | grep -v '^$' | head -1 | cut -c1-140)" \
+            --arg commit "$GITHUB_SHA" \
+            '{versionCode: $code, versionName: $name, sha256: $sha, notes: $notes, commit: $commit}' > version.json
+          cat version.json
       - uses: actions/upload-artifact@v4
         with:
           name: ScannerIP-apk
-          path: android/ScannerIP.apk
+          path: |
+            android/ScannerIP.apk
+            android/version.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -53,8 +67,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          VERSION=$(jq -r .versionName version.json)
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest ScannerIP.apk \
+          gh release create latest ScannerIP.apk version.json \
             --target "${{ github.sha }}" \
-            --title "ScannerIP for Android (latest build)" \
-            --notes "Download ScannerIP.apk on your phone and open it. Android will ask you to allow installs from your browser or Files app the first time. Built from ${{ github.sha }}."
+            --title "ScannerIP $VERSION for Android" \
+            --notes "Download ScannerIP.apk on your phone and open it. Android will ask you to allow installs from your browser or Files app the first time. Already got a version with in-app updates? It shows a banner and updates itself. Built from ${{ github.sha }}."

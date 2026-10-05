@@ -52,21 +52,29 @@ object Net {
     )
 
     /**
-     * A client that sends everything through [route]. No cookies, no cache, no
-     * automatic redirects, and no connection reuse between shifts.
+     * A client that sends everything through [route] (or straight out if
+     * [route] is null). No cookies, no cache and no connection reuse between
+     * shifts. Redirects are off unless asked for: the link inspector wants to
+     * see every hop itself, but downloads from GitHub need them on.
      */
-    fun client(route: Route, timeoutSeconds: Long = 20): OkHttpClient {
+    fun client(
+        route: Route?,
+        timeoutSeconds: Long = 20,
+        followRedirects: Boolean = false,
+        callTimeoutSeconds: Long = timeoutSeconds * 2,
+    ): OkHttpClient {
         val builder = OkHttpClient.Builder()
-            .followRedirects(false)
-            .followSslRedirects(false)
+            .followRedirects(followRedirects)
+            .followSslRedirects(followRedirects)
             .retryOnConnectionFailure(false)
             .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
             .cookieJar(CookieJar.NO_COOKIES)
             .cache(null)
             .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .callTimeout(timeoutSeconds * 2, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
         when (route) {
+            null -> {} // direct, the phone's normal connection
             is Route.Socks -> builder
                 .proxy(Proxy.NO_PROXY)
                 .socketFactory(Socks5SocketFactory(route.host, route.port, route.username, route.password))

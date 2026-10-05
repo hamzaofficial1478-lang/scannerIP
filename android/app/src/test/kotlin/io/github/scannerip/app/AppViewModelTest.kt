@@ -45,6 +45,8 @@ class AppViewModelTest {
             .putString("mode", ShieldMode.DEMO.name)
             .putInt("interval_DEMO", ShieldMode.DEMO.minInterval) // shift every 2 seconds
             .commit()
+        // No real GitHub in tests: point update checks at a port nothing listens on.
+        app.useUpdater(AppUpdater(app, "http://127.0.0.1:9/", 1, "1.0-test"))
         // A fresh factory: getInstance() caches one tied to the first test's Application.
         vm = ViewModelProvider(store, ViewModelProvider.AndroidViewModelFactory(app))[AppViewModel::class.java]
     }

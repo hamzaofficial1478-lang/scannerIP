@@ -19,9 +19,17 @@ The IP shifting and the ID layers are about privacy, and that matters too. The m
 
 ## Getting it on your phone
 
-You need Android 8.0 or newer. Once this project's pull request is merged into `main`, GitHub builds the app and puts it on the [Releases page](https://github.com/hamzaofficial1478-lang/scannerIP/releases/tag/latest) as `ScannerIP.apk`. Open that link on your phone, download the file and tap it. Android will ask you to allow installs from your browser or Files app the first time, and Play Protect may warn you because the app isn't from the Play Store. That's expected for something you've built yourself, so choose "Install anyway". Every build is also attached to its run on the Actions tab, zipped up as `ScannerIP-apk`.
+You need Android 8.0 or newer. Every time `main` changes, GitHub builds the app and puts it on the [Releases page](https://github.com/hamzaofficial1478-lang/scannerIP/releases/tag/latest) as `ScannerIP.apk`, and the [direct download link](https://github.com/hamzaofficial1478-lang/scannerIP/releases/download/latest/ScannerIP.apk) always points at the newest one. Open it on your phone, download the file and tap it. Android will ask you to allow installs from your browser or Files app the first time, and Play Protect may warn you because the app isn't from the Play Store. That's expected for something you've built yourself, so choose "Install anyway". Every build is also attached to its run on the Actions tab, zipped up as `ScannerIP-apk`.
 
 The first time you open it, allow the camera and give the built-in Tor up to a minute to connect. The chip in the top corner turns green and shows your new exit IP once it's ready. If your school or home network blocks Tor (some do), install [Orbot](https://orbot.app/), turn on one of its bridges and pick "Tor via Orbot" in the Shield tab. For a classroom demo with no internet at all, there's Demo mode, which is clearly marked in orange because its IPs are made up. Do check with your teacher before using Tor on the school network.
+
+## Keeping it up to date
+
+A phone can't `git pull` and run the source code, because it only runs a finished app. So ScannerIP does the next best thing. Each build GitHub makes is numbered (1.0.12, 1.0.13 and so on) and published with a small `version.json` that holds its version number and the APK's SHA-256 fingerprint. The app checks that file when it starts, and if there's a newer build, a banner appears at the top with an **Update now** button. Tapping it downloads the new APK through the shield and runs four checks: the fingerprint matches, it's really ScannerIP, it's newer, and it's signed with the same key. Only then is it handed to Android. Android asks you to confirm the update once, because it never lets an app replace itself silently. From Android 12 on, later updates can skip that question. Your scans, settings and IDs all stay put.
+
+With the app closed, it still checks about twice a day and sends you a notification when something new is out. You can switch that off in the Shield tab. It's worth knowing that this background check goes straight to GitHub, because Tor isn't running while the app is closed, so GitHub sees your IP when it happens. The very first in-app update also asks you to let ScannerIP install apps, which is one switch in Android's settings. And a version you installed before the updater existed has to be updated by hand once, from the link above.
+
+The other idea, keeping the program on GitHub and using the phone only as a screen, sounds neat but doesn't work here. GitHub isn't built to answer an app's requests in real time. More importantly, every code you scanned would leave your phone, which is exactly what this project is trying to avoid.
 
 ## What it does
 
@@ -69,7 +77,7 @@ Shifting your IP hides you from the website, not from everyone. The Tor exit can
 
 The "real domain" check uses a short built-in list of two-part endings like `.co.uk` and `.com.pk`, not the full [Public Suffix List](https://publicsuffix.org/).
 
-The Android app was built and tested on a computer, including screenshots of every screen rendered with Robolectric, but not yet on a real phone. Tor's first start, the camera and the Keystore are the parts that only a real device can fully prove. The APK is signed with a demo key that lives in this repo, so every new build installs over the old one. That's fine for a school project, but anyone could sign an app with that key, so make your own before publishing anywhere. The shield only runs while the app is open, and Tor uses a bit of battery and data while it does.
+The Android app was built and tested on a computer, including screenshots of every screen rendered with Robolectric, but not yet on a real phone. Tor's first start, the camera and the Keystore are the parts that only a real device can fully prove. The APK is signed with a demo key that lives in this repo, so every new build installs over the old one. That's fine for a school project, but anyone could sign an app with that key, so make your own before publishing anywhere. (The in-app updater only fetches from this repo's own releases over HTTPS and checks the fingerprint, so a stranger can't push an update through it. But someone could still trick you into installing a fake app signed with the public demo key from somewhere else.) The shield only runs while the app is open, and Tor uses a bit of battery and data while it does.
 
 ## The desktop version
 
@@ -92,11 +100,12 @@ On Linux you might need `sudo apt install python3-tk` for the window. It finds T
 ```
 android/
   core/          plain Kotlin, no phone needed: payloads, analyser, ID layers,
-                 SOCKS5 client, rotators, shield timer, link inspector, scan log
-                 (70 tests: cd android && ./gradlew :core:test)
+                 SOCKS5 client, rotators, shield timer, link inspector, scan log,
+                 update checker
+                 (76 tests: cd android && ./gradlew :core:test)
   app/           the Android app: camera and ZXing-C++, built-in Tor, Android
-                 Keystore keys, and the five Compose screens
-                 (16 tests including screenshots: ./gradlew :app:testDebugUnitTest)
+                 Keystore keys, the updater, and the five Compose screens
+                 (27 tests including screenshots: ./gradlew :app:testDebugUnitTest)
 scannerip/       the desktop version in Python (87 tests: python -m pytest)
 samples/         printable demo codes
 ```
