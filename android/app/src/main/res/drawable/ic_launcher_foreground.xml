@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A shield with a QR finder pattern inside. 108dp canvas, art kept in the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF2FD08A"
+        android:pathData="M54,24 L78,32 L78,52 C78,67 68,79 54,84 C40,79 30,67 30,52 L30,32 Z" />
+    <path
+        android:fillColor="#FF0B3D2E"
+        android:pathData="M42,40 h12 v12 h-12 Z M45,43 v6 h6 v-6 Z M58,40 h8 v8 h-8 Z M42,56 h8 v8 h-8 Z M58,56 h4 v4 h-4 Z M62,60 h4 v4 h-4 Z M54,60 h4 v4 h-4 Z" />
+</vector>
