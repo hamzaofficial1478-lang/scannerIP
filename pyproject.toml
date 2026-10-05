@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scannerip"
+version = "0.1.0"
+description = "QR and barcode scanner that checks codes before trusting them, with IP shifting and layered device IDs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "zxing-cpp>=3.1",
+    "opencv-python-headless>=4.8",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "cryptography>=41.0",
+    "requests[socks]>=2.31",
+    "stem>=1.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+scannerip = "scannerip.cli:main"
+
+[tool.setuptools]
+packages = ["scannerip"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
