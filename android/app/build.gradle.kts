@@ -25,8 +25,8 @@ android {
         versionCode = runNumber ?: 1
         versionName = if (runNumber != null) "1.0.$runNumber" else "1.0-dev"
         buildConfigField("String", "UPDATE_URL", "\"https://github.com/$updateRepo/releases/download/latest/\"")
-        // Real phones (64 and 32-bit ARM) plus x86_64 for the Android emulator.
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        // Real phones: 64-bit ARM, plus 32-bit ARM for budget phones running Android Go.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -42,6 +42,10 @@ android {
     }
 
     buildTypes {
+        // Debug builds also run on the Android emulator on a PC.
+        debug {
+            ndk { abiFilters += "x86_64" }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -73,10 +77,15 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Store Tor and the decoder compressed. Uncompressed they made a 30 MB
+        // download, which slow mobile data and some phone browsers choked on.
+        // Android unpacks them once at install time instead.
+        jniLibs.useLegacyPackaging = true
     }
 
     lint {
         disable += "OldTargetApi" // see targetSdk above
+        disable += "ChromeOsAbiSupport" // phones only; Chromebooks translate ARM anyway
         warningsAsErrors = true
         abortOnError = true
     }

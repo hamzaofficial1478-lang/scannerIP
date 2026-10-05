@@ -72,4 +72,4 @@ jobs:
           gh release create latest ScannerIP.apk version.json \
             --target "${{ github.sha }}" \
             --title "ScannerIP $VERSION for Android" \
-            --notes "Download ScannerIP.apk on your phone and open it. Android will ask you to allow installs from your browser or Files app the first time. Already got a version with in-app updates? It shows a banner and updates itself. Built from ${{ github.sha }}."
+            --notes "Download ScannerIP.apk on your phone and open it. Android will ask you to allow installs from your browser or Files app the first time. Stuck at 100%? Open Files, go to Downloads and tap ScannerIP.apk. Already got a version with in-app updates? It shows a banner and updates itself. Built from ${{ github.sha }}."
