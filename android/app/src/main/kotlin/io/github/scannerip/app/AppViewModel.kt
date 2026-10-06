@@ -8,6 +8,9 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import io.github.scannerip.core.BridgeType
 import io.github.scannerip.core.Decoded
@@ -76,6 +79,9 @@ data class ShieldUi(
     val via: BridgeType? = null,
     /** The timer is on hold while the shielded browser is open. */
     val paused: Boolean = false,
+    /** The phone's own address, fetched only when asked, to compare with the exit. */
+    val ownIp: String? = null,
+    val ownIpBusy: Boolean = false,
 ) {
     /** Link checks only make sense when traffic really goes through another address. */
     val canInspect: Boolean get() = mode.anonymous && state == ShieldState.ACTIVE
@@ -161,6 +167,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var vault: IdentityVault? = null
     @Volatile private var shieldRunner: Shield? = null
     @Volatile private var generation = 0
+    @Volatile private var failures = 0 // shifts in a row that didn't work
+    @Volatile private var inBackground = false
     private var torWatcher: Job? = null
     private val seen = HashMap<String, Long>()
 
@@ -294,8 +302,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             is TorState.Ready -> {
                                 _shield.update { it.copy(via = state.via) }
                                 if (shieldRunner == null) {
-                                    launchShield(gen, TorRotator(socksPort = state.socksPort, name = "Tor (built in)",
-                                        newIdentity = tor::newIdentity), v)
+                                    launchShield(gen, TorRotator(socksPort = state.socksPort, name = "Tor (built in)"), v)
                                 }
                             }
                             is TorState.Failed -> setStatus(ShieldState.ERROR, state.message)
@@ -310,15 +317,40 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val runner = Shield(
             rotator, v, _shield.value.intervalSeconds,
             onRotate = { event -> if (gen == generation) onRotated(event, rotator) },
-            onError = { e -> if (gen == generation) setStatus(ShieldState.ERROR, "Shift failed: ${e.message}. Trying again shortly.") },
+            onError = { e -> if (gen == generation) onShiftFailed(e) },
         )
         shieldRunner = runner
+        failures = 0
         if (rotator.anonymous) setStatus(ShieldState.STARTING, "Getting the first exit IP...")
         else setStatus(ShieldState.DEMO, "Demo mode - made-up IPs")
-        runner.start()
+        if (!inBackground) runner.start() // otherwise it starts when the app comes back
+    }
+
+    /**
+     * One failed shift isn't a reason to sound the alarm. The rotator has gone
+     * back to the last circuit it checked, so the shield stays on with the
+     * address it already had, and tries again in a few seconds. Only a run of
+     * failures, or Tor not answering at all, counts as a real problem.
+     */
+    private fun onShiftFailed(e: Exception) {
+        failures += 1
+        val last = _shield.value.current
+        val unreachable = (e as? RotationError)?.unreachable == true
+        when {
+            failures >= 3 -> setStatus(ShieldState.ERROR,
+                "$failures shifts in a row didn't work: ${e.message}. Still trying every few seconds.")
+            unreachable -> setStatus(ShieldState.STARTING,
+                "Tor isn't answering just now. Phones pause apps to save battery, so it usually comes back within seconds.")
+            last != null -> _shield.update {
+                it.copy(state = ShieldState.ACTIVE,
+                    status = "That shift didn't finish in time, so you're still on ${last.exit.ip}. Trying again in a few seconds.")
+            }
+            else -> setStatus(ShieldState.STARTING, "The first exit IP is taking a while. Trying again in a few seconds.")
+        }
     }
 
     private fun onRotated(event: RotationEvent, rotator: Rotator) {
+        failures = 0
         val torNote = when (event.exit.isTor) { true -> " - Tor confirmed"; false -> " - not a Tor exit"; null -> "" }
         _shield.update {
             val bridgeNote = it.via?.takeIf { via -> via != BridgeType.NONE && it.mode == ShieldMode.BUILT_IN_TOR }
@@ -367,6 +399,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             delay(6000)
             startShield()
         }
+    }
+
+    /**
+     * Fetch the phone's own address, straight out and not through the shield,
+     * so it can be shown next to the exit address. Only ever on request.
+     */
+    fun showOwnIp() {
+        if (_shield.value.ownIpBusy) return
+        _shield.update { it.copy(ownIpBusy = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = try {
+                Net.lookupExitIp(null).ip
+            } catch (e: Exception) {
+                _messages.tryEmit("Couldn't reach the IP check service: ${e.message}")
+                null
+            }
+            _shield.update { it.copy(ownIp = found ?: it.ownIp, ownIpBusy = false) }
+        }
+    }
+
+    /**
+     * Nothing ScannerIP does needs a fresh IP while it's off screen, and Android
+     * may freeze it or cut its network then anyway, which made shifts fail. So
+     * the timer stops in the background and shifts straight away on return.
+     */
+    fun appVisible(visible: Boolean) {
+        inBackground = !visible
+        if (_browser.value != null) return // the browser holds the shield still on its own
+        if (visible) shieldRunner?.start() else shieldRunner?.stop(waitMillis = 0)
+    }
+
+    private val appVisibility = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) = appVisible(true)
+        override fun onStop(owner: LifecycleOwner) = appVisible(false)
+    }
+
+    init {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(appVisibility) // after appVisibility exists
     }
 
     // ---------- going ahead with a code ----------
@@ -423,7 +493,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun closeBrowser() {
         if (_browser.value == null) return
         endBrowsing()
-        shieldRunner?.start()
+        if (!inBackground) shieldRunner?.start()
     }
 
     private fun endBrowsing() {
@@ -603,6 +673,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(appVisibility)
         generation++
         endBrowsing()
         stopShield()

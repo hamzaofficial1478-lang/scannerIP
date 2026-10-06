@@ -21,7 +21,8 @@ import kotlin.random.Random
  *                      mistaken for a real address, and carries no traffic.
  */
 
-class RotationError(message: String, cause: Throwable? = null) : Exception(message, cause)
+/** A shift that didn't work. [unreachable] means Tor (or the proxy) itself didn't answer at all. */
+class RotationError(message: String, cause: Throwable? = null, val unreachable: Boolean = false) : Exception(message, cause)
 
 data class ExitInfo(val ip: String, val via: String, val isTor: Boolean? = null)
 
@@ -69,15 +70,19 @@ class SimulatedRotator(seed: Long? = null) : Rotator {
 /**
  * Gets a new Tor circuit (and so, nearly always, a new exit IP) on each shift.
  *
- * Two tricks, used together:
- * 1. A different SOCKS username per shift. Tor's IsolateSOCKSAuth (on by
- *    default) puts streams with different credentials on different circuits.
- * 2. If we have a control connection, also send NEWNYM ("new identity"). Tor
- *    only honours that about once every 10 seconds, hence the minimum.
+ * The trick is a different SOCKS username per shift. Tor's IsolateSOCKSAuth
+ * (on by default) puts streams with different credentials on different
+ * circuits. Tor's NEWNYM ("new identity") signal can be sent as well, but the
+ * app doesn't: it throws away every circuit, including the last one that
+ * worked, and that's the one to fall back on when a shift fails.
+ *
+ * If a shift fails (Tor is slow to build the new circuit, or the phone has
+ * paused the app), the rotator goes back to the last circuit whose exit IP it
+ * actually checked, so traffic keeps going out of an address we know.
  *
  * Every shift builds a fresh circuit, and the Tor Project asks people not to
  * do that needlessly because it loads the volunteer-run network. So the
- * default is a gentler 30 seconds.
+ * default is a gentler 30 seconds, and never less than 10.
  */
 class TorRotator(
     private val host: String = "127.0.0.1",
@@ -86,6 +91,7 @@ class TorRotator(
     private val newIdentity: (() -> Unit)? = null,
     private val lookup: (Route) -> ExitLookup = { Net.lookupExitIp(it) },
     private val maxAttempts: Int = 2,
+    private val isUp: () -> Boolean = { isListening(host, socksPort) },
 ) : Rotator {
     override val anonymous = true
     override val minIntervalSeconds = 10
@@ -98,12 +104,19 @@ class TorRotator(
     override fun route(): Route = Route.Socks(host, socksPort, "sip-$tag-$circuit", "x")
 
     override fun rotate(): ExitInfo {
+        val lastGood = circuit
         var found: ExitLookup? = null
-        for (attempt in 1..maxAttempts) {
-            circuit += 1
-            try { newIdentity?.invoke() } catch (_: Exception) { /* SOCKS isolation still works */ }
-            found = lookup(route())
-            if (found.ip != lastIp) break // same exit by chance? try one more circuit
+        try {
+            for (attempt in 1..maxAttempts) {
+                circuit += 1
+                try { newIdentity?.invoke() } catch (_: Exception) { /* SOCKS isolation still works */ }
+                found = lookup(route())
+                if (found.ip != lastIp) break // same exit by chance? try one more circuit
+            }
+        } catch (e: Exception) {
+            circuit = lastGood // back to the circuit whose exit we know
+            if (!isUp()) throw RotationError("$name isn't answering on port $socksPort", e, unreachable = true)
+            throw RotationError("The new circuit didn't come up in time (${e.message})", e)
         }
         lastIp = found!!.ip
         return ExitInfo(found.ip, "Tor circuit #$circuit", found.isTor)
@@ -157,7 +170,7 @@ class ProxyPoolRotator(
                 return ExitInfo(found.ip, "proxy ${index + 1}/${pool.size}", found.isTor)
             }
         }
-        current = null
+        // Keep the last proxy that worked: this may only be a blip in the network.
         throw RotationError("None of the proxies answered.")
     }
 }

@@ -77,6 +77,54 @@ class RotatorTest {
     }
 
     @Test
+    fun aFailedShiftFallsBackToTheLastCheckedCircuit() {
+        var fail = false
+        val r = TorRotator(isUp = { true }, lookup = { if (fail) throw java.io.IOException("timeout") else ExitLookup("185.220.101.5", true) })
+        r.rotate()
+        val good = r.route()
+        fail = true
+        val e = assertFailsWith<RotationError> { r.rotate() }
+        assertFalse(e.unreachable) // Tor answered; the new circuit was just slow
+        assertEquals(good, r.route()) // still the circuit whose exit we checked
+    }
+
+    @Test
+    fun torNotAnsweringIsToldApartFromASlowCircuit() {
+        val r = TorRotator(isUp = { false }, lookup = { throw java.net.SocketTimeoutException("failed to connect") })
+        assertTrue(assertFailsWith<RotationError> { r.rotate() }.unreachable)
+    }
+
+    @Test
+    fun proxyPoolKeepsTheLastWorkingProxyThroughABlip() {
+        var up = true
+        val r = ProxyPoolRotator(listOf("http://a:1"), lookup = { if (up) ExitLookup("198.51.100.9", false) else throw java.io.IOException("blip") })
+        r.rotate()
+        up = false
+        assertFailsWith<RotationError> { r.rotate() }
+        assertEquals(Route.Http("a", 1), r.route())
+    }
+
+    @Test
+    fun shieldRetriesSoonAfterAFailedShift() {
+        var calls = 0
+        val flaky = object : Rotator by SimulatedRotator() {
+            val inner = SimulatedRotator()
+            override fun rotate(): ExitInfo {
+                calls++
+                if (calls == 1) throw RotationError("slow circuit")
+                return inner.rotate()
+            }
+        }
+        val events = java.util.Collections.synchronizedList(mutableListOf<RotationEvent>())
+        val shield = Shield(flaky, vault(), onRotate = { events += it }, retryMillis = 50)
+        shield.intervalMillis = 60_000 // a full interval would be a minute
+        shield.start()
+        waitFor { events.isNotEmpty() }
+        shield.stop()
+        assertEquals(1, events.size) // the retry came after 50 ms, not a minute
+    }
+
+    @Test
     fun spotsWhetherSomethingIsListening() {
         ServerSocket(0).use { server -> assertTrue(TorRotator.isListening("127.0.0.1", server.localPort)) }
         val closed = ServerSocket(0).use { it.localPort }

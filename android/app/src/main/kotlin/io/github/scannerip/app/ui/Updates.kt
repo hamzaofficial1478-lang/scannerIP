@@ -53,7 +53,7 @@ fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, modifier: Modifier = 
                 is UpdateState.Downloading -> {
                     LinearProgressIndicator(progress = { state.progress },
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
-                    Text("Downloading ${(state.progress * 100).toInt()}% through the shield...",
+                    Text("Downloading ${(state.progress * 100).toInt()}%...",
                         style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
                 }
                 is UpdateState.Installing -> Text("Checked and verified. Android will ask you to confirm the update.",

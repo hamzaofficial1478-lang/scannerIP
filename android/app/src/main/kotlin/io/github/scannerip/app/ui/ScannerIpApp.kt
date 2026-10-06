@@ -202,12 +202,15 @@ fun ScannerIpApp(vm: AppViewModel) {
                     onStartOrbot = vm::startOrbot,
                     onGetOrbot = { openStore(context) },
                     onBridges = vm::setBridges,
+                    onShowOwnIp = vm::showOwnIp,
+                    onSeeItOnAWebsite = { vm.openShielded("https://check.torproject.org/") },
                     footer = {
                         UpdatesCard(vm.appVersion, updates, backgroundUpdates,
                             onCheck = vm::checkForUpdates, onBackgroundChecks = vm::setBackgroundUpdates)
                     },
                 )
-                Tab.IDS -> IdsScreen(layers, vm.keyDescription, vm::verifySeal)
+                Tab.IDS -> IdsScreen(layers, vm.keyDescription,
+                    onResetAdId = { Launcher.openAdSettings(context)?.let(say) }, onVerifySeal = vm::verifySeal)
                 Tab.HISTORY -> HistoryScreen(
                     entries = history,
                     onShare = {

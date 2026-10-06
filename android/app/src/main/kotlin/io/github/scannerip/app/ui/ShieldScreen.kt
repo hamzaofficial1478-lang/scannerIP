@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +55,8 @@ fun ShieldScreen(
     onStartOrbot: () -> Unit,
     onGetOrbot: () -> Unit,
     onBridges: (BridgeChoice) -> Unit = {},
+    onShowOwnIp: () -> Unit = {},
+    onSeeItOnAWebsite: () -> Unit = {},
     footer: @Composable () -> Unit = {},
 ) {
     Column(
@@ -61,6 +64,7 @@ fun ShieldScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         StatusCard(state, onShiftNow, onRetry)
+        if (state.mode.anonymous) ProofCard(state, onShowOwnIp, onSeeItOnAWebsite)
 
         if (state.mode == ShieldMode.DEMO) {
             SectionCard {
@@ -155,8 +159,9 @@ fun ShieldScreen(
                 valueRange = state.mode.minInterval.toFloat()..AppViewModel.MAX_INTERVAL.toFloat(),
             )
             if (state.mode == ShieldMode.BUILT_IN_TOR || state.mode == ShieldMode.ORBOT) {
-                Text("Tor won't hand out a new identity more than once every 10 seconds, and the Tor Project asks " +
-                    "people not to churn circuits for no reason, so 30 seconds is a kind default.",
+                Text("Every shift builds a new Tor circuit, and the Tor Project asks people not to churn circuits " +
+                    "for no reason, so 30 seconds is a kind default and 10 is the floor. The timer pauses while " +
+                    "ScannerIP is off screen and shifts as soon as you're back.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -200,16 +205,22 @@ private fun StatusCard(state: ShieldUi, onShiftNow: () -> Unit, onRetry: () -> U
             Spacer(Modifier.weight(1f))
             Text(state.mode.title, style = MaterialTheme.typography.labelMedium)
         }
+        // When the shield isn't working, the last address is only history, so don't present it as live.
+        val stale = state.mode.anonymous && state.state != ShieldState.ACTIVE && state.current != null
         Text(
             state.current?.exit?.ip ?: "-",
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             fontSize = 30.sp,
+            color = if (stale) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else Color.Unspecified,
             modifier = Modifier.padding(top = 8.dp),
         )
         Text(
-            if (state.mode.anonymous) "This is the address websites see instead of yours."
-            else "A made-up address for the demo. Websites still see your real one.",
+            when {
+                !state.mode.anonymous -> "A made-up address for the demo. Websites still see your real one."
+                stale -> "The last address the shield used. Nothing is going out through it until the shield is back on."
+                else -> "This is the address websites see instead of yours."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = if (state.mode.anonymous) MaterialTheme.colorScheme.onSurfaceVariant else ShieldAmber,
         )
@@ -224,5 +235,43 @@ private fun StatusCard(state: ShieldUi, onShiftNow: () -> Unit, onRetry: () -> U
             if (state.state == ShieldState.ERROR) OutlinedButton(onClick = onRetry) { Text("Try again") }
             else OutlinedButton(onClick = onShiftNow, enabled = state.current != null) { Text("Shift now") }
         }
+    }
+}
+
+/**
+ * "Is it real?" A fair question when an app says it changes your IP. This
+ * shows the phone's own address next to the exit address, and can open a
+ * real website that reports which address it sees.
+ */
+@Composable
+private fun ProofCard(state: ShieldUi, onShowOwnIp: () -> Unit, onSeeItOnAWebsite: () -> Unit) {
+    SectionCard {
+        Text("Is it really changing?", fontWeight = FontWeight.Bold)
+        Text("Yes, for everything ScannerIP sends: link checks, pages you open safely and update checks. " +
+            "After every shift the app asks check.torproject.org, through the new route, which address it can see, " +
+            "and that's the number above. Other apps on your phone still use your normal address.",
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+        state.ownIp?.let { own ->
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Your phone's own IP", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Text(own, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+            }
+            state.current?.exit?.ip?.let { exit ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("What sites see from ScannerIP", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    Text(exit, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onShowOwnIp, enabled = !state.ownIpBusy) {
+                Text(if (state.ownIpBusy) "Checking..." else "Show my own IP")
+            }
+            OutlinedButton(onClick = onSeeItOnAWebsite, enabled = state.canInspect) { Text("Test on a website") }
+        }
+        Text("\"Show my own IP\" goes straight out, without the shield, so that one check sees your real address. " +
+            "\"Test on a website\" opens check.torproject.org through the shield.",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp))
     }
 }

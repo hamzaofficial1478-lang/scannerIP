@@ -104,11 +104,6 @@ class EmbeddedTor(private val app: Application) {
         }
     }
 
-    /** Ask Tor for a brand new identity (fresh circuits). */
-    fun newIdentity() {
-        service?.torControlConnection?.signal("NEWNYM")
-    }
-
     /** Pick how Tor gets in. Takes effect straight away if Tor is already running. */
     fun setChoice(choice: BridgeChoice) {
         prefs.edit { putString(KEY_CHOICE, choice.name) }
