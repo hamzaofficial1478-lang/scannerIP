@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.scannerip.app.CodeAnalyzer
 import io.github.scannerip.app.ScanResult
 import io.github.scannerip.core.Decoded
+import io.github.scannerip.core.Proceed
 import java.util.concurrent.Executors
 
 @Composable
@@ -64,6 +65,8 @@ fun ScanScreen(
     onInspect: (String) -> Unit,
     onCopy: (String) -> Unit,
     camera: @Composable (Modifier) -> Unit,
+    onProceed: (Proceed) -> Unit = {},
+    onOpenInBrowser: (String) -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -107,12 +110,12 @@ fun ScanScreen(
             }
         }
         if (lastScan != null) {
-            ResultCard(lastScan, canInspect, inspecting, onInspect, onCopy)
+            ResultCard(lastScan, canInspect, inspecting, onInspect, onCopy, onProceed, onOpenInBrowser)
         } else {
             SectionCard {
                 Text("Nothing scanned yet", style = MaterialTheme.typography.titleMedium)
                 Text("Point the camera at a code or pick a screenshot. ScannerIP reads it, checks it for " +
-                    "scam tricks and shows you what's inside. Links are never opened automatically.",
+                    "scam tricks and shows you what's inside. Nothing is opened until you say so.",
                     modifier = Modifier.padding(top = 4.dp))
             }
         }

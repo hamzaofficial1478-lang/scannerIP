@@ -26,6 +26,7 @@ class Shield(
     @Volatile private var stopped = true
     @Volatile private var thread: Thread? = null
     @Volatile private var nextAtNanos: Long? = null
+    @Volatile private var generation = 0
 
     @Volatile
     var current: RotationEvent? = null
@@ -54,31 +55,38 @@ class Shield(
 
     fun secondsLeft(): Double? = nextAtNanos?.let { maxOf(0.0, (it - System.nanoTime()) / 1e9) }
 
+    /** Start shifting on the timer, beginning with a shift straight away. Safe to call after [stop]. */
+    @Synchronized
     fun start() {
-        if (running) return
+        if (running && !stopped) return
         stopped = false
-        thread = Thread({ run() }, "ip-shield").apply { isDaemon = true; start() }
+        // A timer stopped a moment ago may still be finishing a shift. The new
+        // generation number tells it to bow out instead of carrying on too.
+        val mine = ++generation
+        thread = Thread({ run(mine) }, "ip-shield").apply { isDaemon = true; start() }
     }
 
-    private fun run() {
-        while (!stopped) {
+    private fun run(mine: Int) {
+        fun live() = !stopped && mine == generation
+        while (live()) {
             try {
                 rotateNow()
             } catch (e: Exception) {
                 onError?.invoke(e)
             }
             var left = TimeUnit.MILLISECONDS.toNanos(intervalMillis)
-            nextAtNanos = System.nanoTime() + left
+            if (mine == generation) nextAtNanos = System.nanoTime() + left
             sleepLock.withLock {
-                while (!stopped && left > 0) left = wakeUp.awaitNanos(left)
+                while (live() && left > 0) left = wakeUp.awaitNanos(left)
             }
         }
-        nextAtNanos = null
+        if (mine == generation) nextAtNanos = null
     }
 
     /** Stop the timer. Waits up to [waitMillis] for a shift in progress; 0 means don't wait. */
     fun stop(waitMillis: Long = 5000) {
         stopped = true
+        nextAtNanos = null
         sleepLock.withLock { wakeUp.signalAll() }
         val worker = thread
         if (waitMillis > 0 && worker != null && worker !== Thread.currentThread()) worker.join(waitMillis)
