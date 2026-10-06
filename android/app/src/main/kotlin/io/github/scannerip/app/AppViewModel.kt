@@ -9,11 +9,14 @@ import android.os.SystemClock
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.scannerip.core.BridgeType
 import io.github.scannerip.core.Decoded
 import io.github.scannerip.core.IdentityVault
 import io.github.scannerip.core.Inspection
 import io.github.scannerip.core.Kind
 import io.github.scannerip.core.Layer
+import io.github.scannerip.core.Net
+import io.github.scannerip.core.Proceed
 import io.github.scannerip.core.ProxyPoolRotator
 import io.github.scannerip.core.Report
 import io.github.scannerip.core.RotationError
@@ -24,8 +27,10 @@ import io.github.scannerip.core.ScanEntry
 import io.github.scannerip.core.ScanLog
 import io.github.scannerip.core.Shield
 import io.github.scannerip.core.SimulatedRotator
+import io.github.scannerip.core.SocksRelay
 import io.github.scannerip.core.TorRotator
 import io.github.scannerip.core.inspectUrl
+import io.github.scannerip.core.proceedFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -47,8 +52,8 @@ enum class ShieldMode(
     val defaultInterval: Int,
     val anonymous: Boolean,
 ) {
-    BUILT_IN_TOR("Tor (built in)", "Real IP shifting through Tor, running inside this app. The first start takes up to a minute.", 10, 30, true),
-    ORBOT("Tor via Orbot", "Uses the Orbot app's Tor instead. Handy on networks that block Tor, because Orbot can use bridges.", 10, 30, true),
+    BUILT_IN_TOR("Tor (built in)", "Real IP shifting through Tor, running inside this app. Uses a bridge by itself if your network blocks Tor.", 10, 30, true),
+    ORBOT("Tor via Orbot", "Uses the Orbot app's Tor instead, if you already have it set up.", 10, 30, true),
     PROXY_LIST("Proxy list", "Cycles through proxies you type in, one per line.", 3, 10, true),
     DEMO("Demo mode", "Made-up addresses for presentations. Your real IP is NOT hidden.", 2, 5, false),
 }
@@ -66,6 +71,11 @@ data class ShieldUi(
     val intervalSeconds: Int = mode.defaultInterval,
     val proxyText: String = "",
     val orbotInstalled: Boolean = false,
+    val bridges: BridgeChoice = BridgeChoice.AUTO,
+    /** Which way the built-in Tor got in, once it has. */
+    val via: BridgeType? = null,
+    /** The timer is on hold while the shielded browser is open. */
+    val paused: Boolean = false,
 ) {
     /** Link checks only make sense when traffic really goes through another address. */
     val canInspect: Boolean get() = mode.anonymous && state == ShieldState.ACTIVE
@@ -81,6 +91,9 @@ data class ScanResult(
     val inspectableUrl: String?
         get() = report.payload.takeIf { it.kind == Kind.URL && it.fields["scheme"] in setOf("http", "https") }
             ?.fields?.get("url")
+
+    /** What tapping the main button does with this code. */
+    val proceed: Proceed get() = proceedFor(report.payload)
 }
 
 sealed interface InspectUi {
@@ -88,6 +101,18 @@ sealed interface InspectUi {
     data class Running(val url: String) : InspectUi
     data class Done(val url: String, val result: Inspection, val viaIp: String?) : InspectUi
     data class Failed(val url: String, val message: String) : InspectUi
+}
+
+/** The shielded browser: what it's showing and which address the site sees. */
+data class BrowserUi(
+    val url: String,
+    val exitIp: String? = null,
+    val rotatingId: String? = null,
+    val proxyPort: Int = 0,
+    /** Changes whenever the page has to start afresh (a new code or a new IP), which also wipes cookies. */
+    val session: Long = System.nanoTime(),
+) {
+    val ready: Boolean get() = proxyPort > 0
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -119,6 +144,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages
 
+    private val _browser = MutableStateFlow<BrowserUi?>(null)
+    val browser: StateFlow<BrowserUi?> = _browser
+    // The browser's state, relay and route only ever change together, under this lock.
+    private val browseLock = Any()
+    @Volatile private var relay: SocksRelay? = null
+    @Volatile private var browseRoute: Route? = null
+
     private val updater = (app as ScannerIpApplication).updater
     val updates: StateFlow<UpdateState> = updater.state
     val appVersion: String get() = updater.installedVersionName
@@ -144,6 +176,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(logQueue) {
             _history.value = scanLog.readAll().asReversed()
+        }
+        viewModelScope.launch {
+            tor.choice.collect { choice -> _shield.update { it.copy(bridges = choice) } }
         }
         try {
             updater.schedule()
@@ -190,6 +225,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _shield.update { it.copy(proxyText = text) }
     }
 
+    /** How the built-in Tor gets past blocks. Applies straight away if Tor is running. */
+    fun setBridges(choice: BridgeChoice) {
+        tor.setChoice(choice)
+        if (_shield.value.mode == ShieldMode.BUILT_IN_TOR && _shield.value.state == ShieldState.ERROR) {
+            setStatus(ShieldState.STARTING, "Trying again with ${choice.title.lowercase()}...", 0)
+        }
+    }
+
     fun retryShield() {
         viewModelScope.launch { startShield() }
     }
@@ -210,15 +253,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun startShield() {
         val v = vault ?: return
+        endBrowsing()
         stopShield()
         val gen = ++generation
         torWatcher?.cancel()
         val mode = _shield.value.mode
-        _shield.update { it.copy(current = null, history = emptyList(), torProgress = null, secondsLeft = null, orbotInstalled = isOrbotInstalled()) }
+        _shield.update {
+            it.copy(current = null, history = emptyList(), torProgress = null, secondsLeft = null, via = null,
+                paused = false, orbotInstalled = isOrbotInstalled())
+        }
         when (mode) {
             ShieldMode.DEMO -> launchShield(gen, SimulatedRotator(), v)
             ShieldMode.PROXY_LIST -> try {
-                launchShield(gen, ProxyPoolRotator(_shield.value.proxyText.lines()), v)
+                val lookup = getApplication<ScannerIpApplication>().exitLookup ?: { route -> Net.lookupExitIp(route) }
+                launchShield(gen, ProxyPoolRotator(_shield.value.proxyText.lines(), lookup), v)
             } catch (e: RotationError) {
                 setStatus(ShieldState.ERROR, e.message ?: "Proxy list problem")
             }
@@ -234,6 +282,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             ShieldMode.BUILT_IN_TOR -> {
                 tor.start()
+                // After a failure, Try again starts the search for a way in afresh.
+                if (tor.state.value is TorState.Failed) tor.retry()
                 torWatcher = viewModelScope.launch {
                     tor.state.collect { state ->
                         if (gen != generation) return@collect
@@ -241,9 +291,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             TorState.Off -> setStatus(ShieldState.STARTING, "Starting Tor...", 0)
                             is TorState.Starting -> setStatus(ShieldState.STARTING,
                                 "Starting Tor ${state.progress}% - ${state.summary}", state.progress)
-                            is TorState.Ready -> if (shieldRunner == null) {
-                                launchShield(gen, TorRotator(socksPort = state.socksPort, name = "Tor (built in)",
-                                    newIdentity = tor::newIdentity), v)
+                            is TorState.Ready -> {
+                                _shield.update { it.copy(via = state.via) }
+                                if (shieldRunner == null) {
+                                    launchShield(gen, TorRotator(socksPort = state.socksPort, name = "Tor (built in)",
+                                        newIdentity = tor::newIdentity), v)
+                                }
                             }
                             is TorState.Failed -> setStatus(ShieldState.ERROR, state.message)
                         }
@@ -268,9 +321,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun onRotated(event: RotationEvent, rotator: Rotator) {
         val torNote = when (event.exit.isTor) { true -> " - Tor confirmed"; false -> " - not a Tor exit"; null -> "" }
         _shield.update {
+            val bridgeNote = it.via?.takeIf { via -> via != BridgeType.NONE && it.mode == ShieldMode.BUILT_IN_TOR }
+                ?.let { via -> " through a ${via.title} bridge" } ?: ""
             it.copy(
                 state = if (rotator.anonymous) ShieldState.ACTIVE else ShieldState.DEMO,
-                status = if (rotator.anonymous) "Protected via ${event.exit.via}$torNote" else "Demo mode - made-up IPs",
+                status = if (rotator.anonymous) "Protected via ${event.exit.via}$bridgeNote$torNote" else "Demo mode - made-up IPs",
                 torProgress = null,
                 current = event,
                 history = (listOf(event) + it.history).take(50),
@@ -311,6 +366,89 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _messages.emit("Asked Orbot to start. Trying again in a few seconds...")
             delay(6000)
             startShield()
+        }
+    }
+
+    // ---------- going ahead with a code ----------
+
+    /**
+     * Open a web link in the shielded browser. The shield shifts to a fresh IP
+     * and ID first, then holds them steady while the page is open, so the site
+     * sees one consistent address and the one on screen is the real one.
+     */
+    fun openShielded(url: String) {
+        val runner = shieldRunner
+        if (runner == null || !_shield.value.canInspect) {
+            _messages.tryEmit("The shield isn't connected yet, so this can't open safely. Wait for the green chip, " +
+                "or use Open in browser (the site then sees your real IP).")
+            return
+        }
+        val opening = BrowserUi(url)
+        synchronized(browseLock) { _browser.value = opening }
+        runner.stop(waitMillis = 0) // hold still while the page is open; closing the browser restarts it
+        _shield.update { it.copy(paused = true) }
+        viewModelScope.launch(Dispatchers.IO) { freshAddressFor(runner, opening.session) }
+    }
+
+    /** Throw away the browser's cookies and move it to a new IP and ID, then reload [currentUrl]. */
+    fun newBrowserIdentity(currentUrl: String?) {
+        val runner = shieldRunner ?: return
+        val open = _browser.value ?: return
+        val again = BrowserUi(currentUrl?.takeIf { it.startsWith("http") } ?: open.url)
+        synchronized(browseLock) { _browser.value = again }
+        viewModelScope.launch(Dispatchers.IO) { freshAddressFor(runner, again.session) }
+    }
+
+    private fun freshAddressFor(runner: Shield, session: Long) {
+        try {
+            val event = runner.rotateNow()
+            val route = runner.route()
+            synchronized(browseLock) {
+                val open = _browser.value
+                if (open?.session != session) return // closed, or a newer request took over, while we shifted
+                browseRoute = route
+                val r = relay ?: SocksRelay { browseRoute ?: throw RotationError("The browser is closed") }.also { relay = it }
+                r.dropConnections() // nothing carries over from the last address
+                _browser.value = open.copy(exitIp = event.exit.ip, rotatingId = event.identity.rotatingId, proxyPort = r.port)
+            }
+        } catch (e: Exception) {
+            if (_browser.value?.session == session) {
+                closeBrowser()
+                _messages.tryEmit("Couldn't get a fresh IP for this page: ${e.message}")
+            }
+        }
+    }
+
+    /** Close the shielded browser and let the shield shift on its timer again (starting with a shift now). */
+    fun closeBrowser() {
+        if (_browser.value == null) return
+        endBrowsing()
+        shieldRunner?.start()
+    }
+
+    private fun endBrowsing() {
+        synchronized(browseLock) {
+            _browser.value = null
+            browseRoute = null
+            relay?.close()
+            relay = null
+        }
+        _shield.update { it.copy(paused = false) }
+    }
+
+    /**
+     * Something was handed to another app (the dialler, Contacts, Wi-Fi...).
+     * Those apps don't go through the shield, but ScannerIP still moves on to
+     * a fresh IP and ID, so what it does next can't be tied to this code.
+     */
+    fun proceededElsewhere() {
+        val runner = shieldRunner ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                runner.rotateNow()
+            } catch (_: Exception) {
+                // The timer will try again; nothing was waiting on this one.
+            }
         }
     }
 
@@ -388,19 +526,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- updates ----------
 
     /**
-     * Update traffic goes through the shield like everything else, so in a Tor or
-     * proxy mode it waits until the shield is up. Demo mode isn't hiding the IP
-     * anyway, so there it goes straight out.
+     * Update traffic goes through the shield when the shield is up. When it
+     * isn't (Tor blocked, say), it goes straight to GitHub and says so, because
+     * otherwise a phone stuck without Tor could never get the fix. Every
+     * download is still checked against its fingerprint and signing key.
      */
     private fun withUpdateRoute(action: suspend (Route?) -> Unit) {
         val state = _shield.value
         val runner = shieldRunner
-        if (state.mode.anonymous && (runner == null || !state.canInspect)) {
-            _messages.tryEmit("Updates come through the shield too, so wait a moment for it to connect.")
-            return
+        val shielded = state.mode.anonymous && runner != null && state.canInspect && !state.paused
+        if (state.mode.anonymous && !shielded) {
+            _messages.tryEmit("The shield isn't connected, so this goes straight to GitHub. Downloads are still checked before they install.")
         }
         viewModelScope.launch {
-            val route = if (state.mode.anonymous) withContext(Dispatchers.IO) { runner?.route() } else null
+            val route = if (shielded && runner != null) withContext(Dispatchers.IO) { runner.route() } else null
             action(route)
         }
     }
@@ -465,6 +604,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         generation++
+        endBrowsing()
         stopShield()
     }
 

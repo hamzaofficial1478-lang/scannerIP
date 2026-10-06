@@ -36,6 +36,7 @@ import io.github.scannerip.core.SimulatedRotator
 import io.github.scannerip.core.SoftwareKeys
 import io.github.scannerip.core.analyseText
 import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -174,6 +175,57 @@ class ScreenshotTest {
         compose.onNodeWithText("Update now").assertExists()
         compose.onNodeWithText("Downloading 45% through the shield...").assertExists()
         compose.onNodeWithText("You have ScannerIP 1.0.5").assertExists()
+    }
+
+    @Test
+    fun proceedButtonsForEachKindOfCode() {
+        shoot("7-proceed") {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                ResultCard(result("WIFI:T:WPA;S:HomeNet;P:correct horse battery staple;;"), true, false, {}, {})
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(6.dp))
+                ResultCard(result("https://www.bbc.co.uk/news"), true, false, {}, {})
+            }
+        }
+        compose.onNodeWithText("Join network").assertExists()
+        compose.onNodeWithText("Open safely").assertExists()
+        compose.onNodeWithText("Open in my browser instead").assertExists()
+    }
+
+    @Test
+    fun riskyCodesAskBeforeGoingAhead() {
+        var went = 0
+        shoot("7b-proceed-confirm") {
+            ResultCard(result("https://free-updates.example/whatsapp-gold.apk"), true, false, {}, {}, onProceed = { went++ })
+        }
+        compose.onNodeWithText("Open safely").performClick()
+        compose.onNodeWithText("This code looks dangerous").assertExists()
+        assertEquals(0, went)
+        compose.onNodeWithText("Go ahead anyway").performClick()
+        assertEquals(1, went)
+    }
+
+    @Test
+    fun shieldedBrowserBar() {
+        val state = io.github.scannerip.app.BrowserUi("https://www.bbc.co.uk/news", "185.220.101.42",
+            "RID-7Q2M-K9XD-4HCT-PW3N", proxyPort = 40123)
+        shoot("8-browser") {
+            BrowserScreen(state, "https://www.bbc.co.uk/news", 60, androidx.compose.material3.SnackbarHostState(), {}, {}) { modifier ->
+                Box(modifier.background(Color(0xFFF4F4F4)), contentAlignment = Alignment.Center) {
+                    Text("(web page)", color = Color(0x88000000))
+                }
+            }
+        }
+        compose.onNodeWithText("Site sees 185.220.101.42").assertExists()
+        compose.onNodeWithText("New IP").assertExists()
+    }
+
+    @Test
+    fun shieldScreenWithBridges() {
+        shoot("3d-shield-bridges") {
+            ShieldScreen(shieldUi().copy(via = io.github.scannerip.core.BridgeType.SNOWFLAKE), {}, {}, {}, {}, {}, {}, {})
+        }
+        compose.onNodeWithText("Getting past blocks").assertExists()
+        compose.onNodeWithText("Automatic (recommended)").assertExists()
     }
 
     @Test

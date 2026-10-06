@@ -91,6 +91,15 @@ class AppViewModelTest {
     }
 
     @Test
+    fun openSafelyNeedsARealShield() {
+        // Demo IPs hide nothing, so the shielded browser won't pretend otherwise.
+        waitFor { vm.shield.value.current != null }
+        vm.openShielded("https://example.com/")
+        assertEquals(null, vm.browser.value)
+        assertTrue(!vm.shield.value.paused)
+    }
+
+    @Test
     fun cameraDoesNotRepeatTheSameCode() {
         waitFor { vm.shield.value.current != null }
         val code = io.github.scannerip.core.Decoded("QR Code", "https://www.bbc.co.uk/news", ByteArray(0), false)

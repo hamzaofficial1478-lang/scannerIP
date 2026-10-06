@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.camera.view)
     implementation(libs.zxing.cpp)
     implementation(libs.tor.android)
+    implementation(libs.iptproxy) // obfs4, Snowflake and meek bridges, as used by Orbot
+    implementation(libs.androidx.webkit)
     implementation(libs.work.runtime)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

@@ -123,6 +123,33 @@ class RotatorTest {
     }
 
     @Test
+    fun pausingAndResumingKeepsJustOneTimer() {
+        // The shielded browser pauses the timer and resumes it later, sometimes
+        // while a shift is still half-way through. That mustn't leave two timers.
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val slow = object : Rotator by SimulatedRotator() {
+            val inner = SimulatedRotator()
+            override fun rotate(): ExitInfo {
+                if (calls.incrementAndGet() == 1) gate.await()
+                return inner.rotate()
+            }
+        }
+        val shield = Shield(slow, vault(), intervalSeconds = 600)
+        shield.start()
+        waitFor { calls.get() == 1 } // the first shift is stuck half-way
+        shield.stop(waitMillis = 0)
+        assertNull(shield.secondsLeft())
+        shield.start()
+        gate.countDown()
+        waitFor { calls.get() >= 2 }
+        Thread.sleep(300)
+        assertEquals(1, Thread.getAllStackTraces().keys.count { it.name == "ip-shield" && it.isAlive })
+        assertTrue(shield.running)
+        shield.stop()
+    }
+
+    @Test
     fun stopWakesTheTimerStraightAway() {
         val shield = Shield(SimulatedRotator(), vault(), intervalSeconds = 600)
         shield.start()

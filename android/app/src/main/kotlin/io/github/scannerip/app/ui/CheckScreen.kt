@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.scannerip.app.ScanResult
+import io.github.scannerip.core.Proceed
 import io.github.scannerip.core.SAMPLES
 import io.github.scannerip.core.Sample
 import io.github.scannerip.core.makeVisible
@@ -38,6 +39,8 @@ fun CheckScreen(
     onSample: (Sample) -> Unit,
     onInspect: (String) -> Unit,
     onCopy: (String) -> Unit,
+    onProceed: (Proceed) -> Unit = {},
+    onOpenInBrowser: (String) -> Unit = {},
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     Column(
@@ -56,7 +59,7 @@ fun CheckScreen(
         )
         Button(onClick = { onCheck(text) }, enabled = text.isNotBlank()) { Text("Check it") }
 
-        lastScan?.let { ResultCard(it, canInspect, inspecting, onInspect, onCopy) }
+        lastScan?.let { ResultCard(it, canInspect, inspecting, onInspect, onCopy, onProceed, onOpenInBrowser) }
 
         Text("Demo codes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
         Text("The same set as the desktop version's samples folder, from harmless to nasty. " +

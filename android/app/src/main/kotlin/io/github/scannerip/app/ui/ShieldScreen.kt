@@ -34,9 +34,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.scannerip.app.AppViewModel
+import io.github.scannerip.app.BridgeChoice
 import io.github.scannerip.app.ShieldMode
 import io.github.scannerip.app.ShieldState
 import io.github.scannerip.app.ShieldUi
+import io.github.scannerip.core.BridgeType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,6 +53,7 @@ fun ShieldScreen(
     onProxyText: (String) -> Unit,
     onStartOrbot: () -> Unit,
     onGetOrbot: () -> Unit,
+    onBridges: (BridgeChoice) -> Unit = {},
     footer: @Composable () -> Unit = {},
 ) {
     Column(
@@ -83,6 +86,39 @@ fun ShieldScreen(
                     Column {
                         Text(mode.title, fontWeight = FontWeight.SemiBold)
                         Text(mode.blurb, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        if (state.mode == ShieldMode.BUILT_IN_TOR) {
+            Text("Getting past blocks", style = MaterialTheme.typography.titleMedium)
+            SectionCard {
+                val now = when (state.via) {
+                    null -> ""
+                    BridgeType.NONE -> " Right now Tor is connected directly."
+                    else -> " Right now Tor is connected through a ${state.via.title} bridge."
+                }
+                Text("Some networks block Tor, and then it gets stuck early on (often at 10%). A bridge is a hidden " +
+                    "way in that doesn't look like Tor.$now", style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 4.dp))
+                BridgeChoice.entries.forEachIndexed { i, choice ->
+                    if (i > 0) HorizontalDivider()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = choice == state.bridges, onClick = { onBridges(choice) }, role = Role.RadioButton)
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        RadioButton(selected = choice == state.bridges, onClick = null)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(if (choice == BridgeChoice.AUTO) "${choice.title} (recommended)" else choice.title,
+                                fontWeight = FontWeight.SemiBold)
+                            Text(choice.blurb, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }

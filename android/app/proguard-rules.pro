@@ -3,6 +3,11 @@
 -keep class org.torproject.jni.** { *; }
 -keep class net.freehaven.tor.control.** { *; }
 
+# IPtProxy (the bridges) is Go behind gomobile, which finds its Java classes
+# and callbacks by name over JNI.
+-keep class go.** { *; }
+-keep class IPtProxy.** { *; }
+
 # zxing-cpp ships its own keep rules; this is belt and braces for JNI.
 -keep class zxingcpp.** { *; }
 

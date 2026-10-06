@@ -62,8 +62,10 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.scannerip.app.AppViewModel
 import io.github.scannerip.app.InspectUi
+import io.github.scannerip.app.Launcher
 import io.github.scannerip.app.ShieldState
 import io.github.scannerip.app.ShieldUi
+import io.github.scannerip.core.Proceed
 import kotlinx.coroutines.launch
 
 enum class Tab(val label: String, val icon: ImageVector) {
@@ -86,6 +88,7 @@ fun ScannerIpApp(vm: AppViewModel) {
     val codesInView by vm.codesInView.collectAsStateWithLifecycle()
     val updates by vm.updates.collectAsStateWithLifecycle()
     val backgroundUpdates by vm.backgroundUpdates.collectAsStateWithLifecycle()
+    val browser by vm.browser.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableStateOf(Tab.SCAN) }
     var torchOn by rememberSaveable { mutableStateOf(false) }
@@ -117,6 +120,27 @@ fun ScannerIpApp(vm: AppViewModel) {
         if (Build.VERSION.SDK_INT < 33) scope.launch { snackbar.showSnackbar("Copied. Paste it somewhere harmless, not straight into a browser.") }
     }
     val inspecting = inspection is InspectUi.Running
+    val say: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    // Going ahead with a code: web pages open in the shielded browser, everything
+    // else goes to the phone app for it. Either way the shield moves on to a new IP and ID.
+    val proceed: (Proceed) -> Unit = { action ->
+        if (action is Proceed.Browse) {
+            vm.openShielded(action.url)
+        } else {
+            Launcher.launch(context, action)?.let(say)
+            vm.proceededElsewhere()
+        }
+    }
+    val openOutside: (String) -> Unit = { url ->
+        Launcher.openInBrowser(context, url)?.let(say)
+        vm.proceededElsewhere()
+    }
+
+    val open = browser
+    if (open != null) {
+        ShieldedBrowser(open, snackbar, onClose = vm::closeBrowser, onNewIp = vm::newBrowserIdentity, onMessage = say)
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -154,6 +178,8 @@ fun ScannerIpApp(vm: AppViewModel) {
                     onInspect = vm::inspect,
                     onCopy = copy,
                     camera = { modifier -> CameraPreview(vm::onCameraCodes, torchOn, modifier) },
+                    onProceed = proceed,
+                    onOpenInBrowser = openOutside,
                 )
                 Tab.CHECK -> CheckScreen(
                     lastScan = lastScan,
@@ -163,6 +189,8 @@ fun ScannerIpApp(vm: AppViewModel) {
                     onSample = { vm.checkText(it.text, "Demo code") },
                     onInspect = vm::inspect,
                     onCopy = copy,
+                    onProceed = proceed,
+                    onOpenInBrowser = openOutside,
                 )
                 Tab.SHIELD -> ShieldScreen(
                     state = shield,
@@ -173,6 +201,7 @@ fun ScannerIpApp(vm: AppViewModel) {
                     onProxyText = vm::setProxyText,
                     onStartOrbot = vm::startOrbot,
                     onGetOrbot = { openStore(context) },
+                    onBridges = vm::setBridges,
                     footer = {
                         UpdatesCard(vm.appVersion, updates, backgroundUpdates,
                             onCheck = vm::checkForUpdates, onBackgroundChecks = vm::setBackgroundUpdates)
