@@ -7,7 +7,7 @@ It started life as a school project, so the code is written to be read. Every fi
 <p>
 <img src="docs/android/scan.png" width="200" alt="Scan tab showing a risk report and the Open safely button">
 <img src="docs/android/browser.png" width="200" alt="The shielded browser, showing the address the site sees">
-<img src="docs/android/shield.png" width="200" alt="Shield tab with the bridge options">
+<img src="docs/android/shield.png" width="200" alt="Shield tab showing the phone's own IP next to the Tor exit">
 <img src="docs/android/ids.png" width="200" alt="The five device ID layers">
 </p>
 
@@ -16,6 +16,8 @@ It started life as a school project, so the code is written to be read. Every fi
 A QR code is just text. It can't install malware on its own, and changing your IP address won't make a dodgy code any less dodgy. What actually hurts people is what the phone does next: opening a phishing page, installing an APK, joining a fake Wi-Fi network or paying a merchant code that's been swapped for a scammer's. So ScannerIP's main line of defence is the analyser. It reads the code and flags trouble *before* anything is opened. Nothing happens until you tap a button, and a code that scores High or Dangerous asks you a second time.
 
 The IP shifting and the ID layers are about privacy, and that matters too. The moment you visit a malicious link, the attacker's server logs your IP address, which gives away roughly where you are and which network you're on, and lets them link your visits together. When you open a link from ScannerIP, the site only ever sees a borrowed Tor address, and the next code gets a different one. That's the real job of the shield.
+
+A fair question is whether the IP really changes or the app just shows a made-up number. In the Tor modes it really changes. After every shift the app asks `check.torproject.org` which address it can see through the new route, and that's the number on screen. The Shield tab can also put your phone's own IP next to it, and "Test on a website" opens `check.torproject.org` in the shielded browser so you can see the site report the Tor address for itself. Only Demo mode uses made-up addresses, and it says so in orange.
 
 It can only cover what goes through ScannerIP, though. Web pages do, because they open in its own browser. A phone call, a text, joining a Wi-Fi network or paying in a banking app is handed to that app, and it uses your phone's normal connection. ScannerIP still moves on to a fresh IP and ID when you do that, so whatever it does next can't be tied to that code, and it tells you plainly on the button which kind of action you're about to take.
 
@@ -49,11 +51,13 @@ When you're happy with a code, the big button goes ahead with it, the way other 
 
 ## How the IP shifting works
 
-On the phone, Tor runs inside the app using the Guardian Project's tor-android library, which is the same Tor that powers Orbot. Every shift connects to Tor using a new made-up username. Tor has a setting called `IsolateSOCKSAuth` (on by default) that puts each different username on its own circuit, which means a different exit relay and, almost always, a different public IP. ScannerIP also sends Tor the `NEWNYM` "new identity" signal. After each shift it asks `check.torproject.org` which address it can see, so the IP on screen is the real exit address and not a guess.
+On the phone, Tor runs inside the app using the Guardian Project's tor-android library, which is the same Tor that powers Orbot. Every shift connects to Tor using a new made-up username. Tor has a setting called `IsolateSOCKSAuth` (on by default) that puts each different username on its own circuit, which means a different exit relay and, almost always, a different public IP. After each shift it asks `check.torproject.org` which address it can see, so the IP on screen is the real exit address and not a guess.
+
+Shifts don't always work first time. Tor might be slow to build the new circuit, or the phone might have paused the app for a moment to save battery. When that happens, ScannerIP goes back to the last circuit whose address it actually checked, so the shield stays on with the address it already had, and it tries again ten seconds later. Only three failures in a row turn the shield red. Early versions also sent Tor's `NEWNYM` "new identity" signal on every shift, but that throws away every circuit, including the one to fall back on, so it's gone. The timer also stops while ScannerIP is off screen, because nothing needs a fresh address then and Android may freeze the app anyway. It shifts straight away when you come back.
 
 The app talks to Tor through its own small SOCKS5 client rather than Android's built-in one. That's deliberate. The built-in one looks up a website's name on your normal connection before handing it to Tor, which would leak every site you check to whoever runs your network's DNS. ScannerIP always passes the name itself to Tor, and there's a test that proves it: it asks for a `.invalid` address that can never be looked up locally, so the test only passes if the name went through the proxy.
 
-The default is a shift every 30 seconds with Tor. You can go down to 10, but no lower, because Tor only honours `NEWNYM` about once every 10 seconds. The Tor Project also asks people not to churn through circuits for no reason, since it puts load on a network run by volunteers. With a proxy list the default is 10 seconds, and in demo mode it's 5.
+The default is a shift every 30 seconds with Tor. You can go down to 10, but no lower, because the Tor Project asks people not to churn through circuits for no reason, since it puts load on a network run by volunteers. With a proxy list the default is 10 seconds, and in demo mode it's 5.
 
 Demo mode uses the RFC 5737 documentation ranges (192.0.2.x, 198.51.100.x and 203.0.113.x). Those are reserved for examples and can never belong to a real machine, and demo mode refuses to carry any traffic at all, so it can't give you a false sense of safety.
 
@@ -91,6 +95,8 @@ On the phone, both keys are generated inside the Android Keystore. The app can u
 
 A quick word on "no one can decode it". Layers 2, 3 and 4 are one-way, so there's no key in the world that turns them back into your device ID. Layer 1 is proper encryption, which means it *can* be opened, but only with the key on your device. The desktop version keeps that key in a file in your home folder instead, so there, someone who copied the key file and a sealed token off your computer could open it.
 
+These are ScannerIP's own IDs. The app never sends your phone's IDs anywhere, but it can't change them either, and no app can. The IMEI is built into the phone, and Android gives each app its own fixed ID that only a factory reset changes. The IDs tab is honest about this. It points to the two you can change yourself: the advertising ID, which ad networks use to follow you from app to app (there's a button to reset or delete it), and the Wi-Fi MAC address, which Android already randomises for each network.
+
 Every scan is saved under the rotating ID rather than anything tied to the device. If the history ever leaked, nobody could trace the scans back to you or even link them to each other across shifts. The app also opts out of Android's cloud backups, so none of this leaves the phone.
 
 ## Limits worth mentioning in your evaluation
@@ -107,7 +113,7 @@ WebRTC is removed by a script that runs at the start of every page and frame. It
 
 The "real domain" check uses a short built-in list of two-part endings like `.co.uk` and `.com.pk`, not the full [Public Suffix List](https://publicsuffix.org/).
 
-The Android app was built and tested on a computer, including screenshots of every screen rendered with Robolectric. The real phone it has been tried on so far showed Tor stuck at 10% on its network, which is what led to the bridges. The bridges themselves couldn't be tried from the build machine, because it can't reach the Tor network. What's tested is the Tor configuration they produce, the automatic switching logic, and the relay the browser goes through. The library and bridge lines are the same ones Orbot and Tor Browser use. The APK is signed with a demo key that lives in this repo, so every new build installs over the old one. That's fine for a school project, but anyone could sign an app with that key, so make your own before publishing anywhere. (The in-app updater only fetches from this repo's own releases over HTTPS and checks the fingerprint, so a stranger can't push an update through it. But someone could still trick you into installing a fake app signed with the public demo key from somewhere else.) The shield only runs while the app is open, and Tor uses a bit of battery and data while it does.
+The Android app was built and tested on a computer, including screenshots of every screen rendered with Robolectric. The real phone it has been tried on so far showed Tor stuck at 10% on its network, which is what led to the bridges. The bridges themselves couldn't be tried from the build machine, because it can't reach the Tor network. What's tested is the Tor configuration they produce, the automatic switching logic, and the relay the browser goes through. The library and bridge lines are the same ones Orbot and Tor Browser use. The APK is signed with a demo key that lives in this repo, so every new build installs over the old one. That's fine for a school project, but anyone could sign an app with that key, so make your own before publishing anywhere. (The in-app updater only fetches from this repo's own releases over HTTPS and checks the fingerprint, so a stranger can't push an update through it. But someone could still trick you into installing a fake app signed with the public demo key from somewhere else.) The shield only shifts while the app is on screen, and Tor uses a bit of battery and data while it does.
 
 ## The desktop version
 
@@ -133,11 +139,11 @@ android/
                  code's "go ahead" button does, ID layers, SOCKS5 client and the
                  browser's relay, rotators, bridges, shield timer, link inspector,
                  scan log, update checker
-                 (101 tests: cd android && ./gradlew :core:test)
+                 (105 tests: cd android && ./gradlew :core:test)
   app/           the Android app: camera and ZXing-C++, built-in Tor and its
                  bridges, Android Keystore keys, the shielded browser, hand-offs
                  to other apps, the updater, and the Compose screens
-                 (44 tests including screenshots: ./gradlew :app:testDebugUnitTest)
+                 (48 tests including screenshots: ./gradlew :app:testDebugUnitTest)
 scannerip/       the desktop version in Python (87 tests: python -m pytest)
 samples/         printable demo codes
 ```

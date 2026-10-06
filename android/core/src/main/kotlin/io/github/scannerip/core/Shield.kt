@@ -14,6 +14,8 @@ class Shield(
     @Volatile var onRotate: ((RotationEvent) -> Unit)? = null,
     @Volatile var onError: ((Exception) -> Unit)? = null,
     private val historySize: Int = 50,
+    /** After a failed shift, try again this soon instead of waiting a whole interval. */
+    private val retryMillis: Long = 10_000,
 ) {
     /** Time between shifts, never below what the rotator allows. */
     @Volatile
@@ -69,12 +71,14 @@ class Shield(
     private fun run(mine: Int) {
         fun live() = !stopped && mine == generation
         while (live()) {
-            try {
+            val wait = try {
                 rotateNow()
+                intervalMillis
             } catch (e: Exception) {
                 onError?.invoke(e)
+                minOf(intervalMillis, retryMillis)
             }
-            var left = TimeUnit.MILLISECONDS.toNanos(intervalMillis)
+            var left = TimeUnit.MILLISECONDS.toNanos(wait)
             if (mine == generation) nextAtNanos = System.nanoTime() + left
             sleepLock.withLock {
                 while (live() && left > 0) left = wakeUp.awaitNanos(left)

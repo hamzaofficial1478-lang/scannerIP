@@ -93,8 +93,11 @@ object Net {
         return builder.build()
     }
 
-    /** Ask a public "what's my IP" service which address it sees us coming from. */
-    fun lookupExitIp(route: Route, urls: List<String> = IP_CHECK_URLS, timeoutSeconds: Long = 20): ExitLookup {
+    /**
+     * Ask a public "what's my IP" service which address it sees us coming from.
+     * With a null [route] it goes straight out, which shows the phone's own IP.
+     */
+    fun lookupExitIp(route: Route?, urls: List<String> = IP_CHECK_URLS, timeoutSeconds: Long = 20): ExitLookup {
         val client = client(route, timeoutSeconds)
         var lastError: Exception? = null
         for (url in urls) {

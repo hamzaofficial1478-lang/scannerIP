@@ -45,6 +45,7 @@ class ShieldedBrowsingTest {
     private val proxy = ServerSocket(0)
     private val asked = Collections.synchronizedList(mutableListOf<Pair<String?, String>>())
     private val lookups = AtomicInteger()
+    @Volatile private var lookupsFail = false
 
     private fun waitFor(seconds: Double = 8.0, condition: () -> Boolean) {
         val end = System.nanoTime() + (seconds * 1e9).toLong()
@@ -65,7 +66,10 @@ class ShieldedBrowsingTest {
             }
         }
         // Each shift "finds" a new exit address without going near the internet.
-        app.exitLookup = { ExitLookup("185.220.101.${lookups.incrementAndGet()}", true) }
+        app.exitLookup = {
+            if (lookupsFail) throw IOException("circuit too slow")
+            ExitLookup("185.220.101.${lookups.incrementAndGet()}", true)
+        }
         app.useUpdater(AppUpdater(app, "http://127.0.0.1:9/", 1, "1.0-test"))
         app.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
             .putString("mode", ShieldMode.PROXY_LIST.name)
@@ -168,6 +172,36 @@ class ShieldedBrowsingTest {
         waitFor(10.0) { vm.shield.value.history.size >= shifts + 3 }
         assertFalse("no relay should be left listening",
             Thread.getAllStackTraces().keys.any { it.name == "socks-relay" && it.isAlive })
+    }
+
+    @Test
+    fun aSlowShiftKeepsTheShieldOnAndOnlyARunOfFailuresTurnsItRed() {
+        waitFor { vm.shield.value.state == ShieldState.ACTIVE }
+        val ip = vm.shield.value.current!!.exit.ip
+        lookupsFail = true
+        waitFor { "didn't finish" in vm.shield.value.status }
+        // Still protected, on the address it had: the proxy behind it hasn't gone anywhere.
+        assertEquals(ShieldState.ACTIVE, vm.shield.value.state)
+        assertEquals(ip, vm.shield.value.current!!.exit.ip)
+        assertTrue(vm.shield.value.canInspect)
+        // Three in a row is a real problem, and says so.
+        waitFor(15.0) { vm.shield.value.state == ShieldState.ERROR }
+        assertTrue("in a row" in vm.shield.value.status)
+        // And it recovers on its own once shifts work again.
+        lookupsFail = false
+        waitFor(15.0) { vm.shield.value.state == ShieldState.ACTIVE && vm.shield.value.current!!.exit.ip != ip }
+    }
+
+    @Test
+    fun noShiftingWhileTheAppIsOffScreen() {
+        waitFor { vm.shield.value.state == ShieldState.ACTIVE }
+        vm.appVisible(false)
+        Thread.sleep(300) // let a shift that was already under way finish
+        val before = vm.shield.value.history.size
+        Thread.sleep(3600) // longer than the 3-second interval
+        assertEquals(before, vm.shield.value.history.size)
+        vm.appVisible(true) // back on screen: a fresh shift straight away
+        waitFor(2.0) { vm.shield.value.history.size > before }
     }
 
     @Test

@@ -121,6 +121,13 @@ class LauncherTest {
     }
 
     @Test
+    fun advertisingIdSettingsOpenGooglesAdsPage() {
+        assertNull(Launcher.openAdSettings(app))
+        val page = shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>()).nextStartedActivity
+        assertEquals("com.google.android.gms.settings.ADS_PRIVACY", page.action)
+    }
+
+    @Test
     fun noAppForItIsReportedNotCrashed() {
         shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>()).checkActivities(true)
         val message = Launcher.launch(app, proceedFor(classify("bitcoin:bc1qexample?amount=0.05")))

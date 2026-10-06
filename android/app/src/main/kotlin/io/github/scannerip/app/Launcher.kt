@@ -40,6 +40,26 @@ object Launcher {
         "Android wouldn't let ScannerIP do that: ${e.message}"
     }
 
+    /**
+     * Open the page where the advertising ID can be reset or deleted. It
+     * lives in Google Play services; failing that, the privacy settings.
+     */
+    fun openAdSettings(context: Context): String? {
+        val pages = buildList {
+            add(Intent("com.google.android.gms.settings.ADS_PRIVACY"))
+            if (Build.VERSION.SDK_INT >= 29) add(Intent(Settings.ACTION_PRIVACY_SETTINGS))
+            add(Intent(Settings.ACTION_SETTINGS))
+        }
+        for (page in pages) {
+            try {
+                return start(context, page)
+            } catch (_: ActivityNotFoundException) {
+                // try the next one
+            }
+        }
+        return "Couldn't open the settings. Look under Settings > Privacy > Ads (or Google > Ads)."
+    }
+
     /** Open a web link in the phone's normal browser, outside the shield. */
     fun openInBrowser(context: Context, url: String): String? = launch(context, Proceed.Browse(url))
 

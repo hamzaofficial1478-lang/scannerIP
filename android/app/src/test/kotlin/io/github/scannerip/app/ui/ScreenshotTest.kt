@@ -173,7 +173,7 @@ class ScreenshotTest {
             }
         }
         compose.onNodeWithText("Update now").assertExists()
-        compose.onNodeWithText("Downloading 45% through the shield...").assertExists()
+        compose.onNodeWithText("Downloading 45%...").assertExists()
         compose.onNodeWithText("You have ScannerIP 1.0.5").assertExists()
     }
 
@@ -220,6 +220,16 @@ class ScreenshotTest {
     }
 
     @Test
+    fun shieldScreenProvesTheIpChangeIsReal() {
+        shoot("3e-shield-proof") {
+            ShieldScreen(shieldUi().copy(ownIp = "198.51.100.23"), {}, {}, {}, {}, {}, {}, {})
+        }
+        compose.onNodeWithText("Is it really changing?").assertExists()
+        compose.onNodeWithText("198.51.100.23").assertExists()
+        compose.onNodeWithText("Test on a website").assertExists()
+    }
+
+    @Test
     fun shieldScreenWithBridges() {
         shoot("3d-shield-bridges") {
             ShieldScreen(shieldUi().copy(via = io.github.scannerip.core.BridgeType.SNOWFLAKE), {}, {}, {}, {}, {}, {}, {})
@@ -234,6 +244,7 @@ class ScreenshotTest {
             IdsScreen(vault.layers(), vault.keyDescription) {}
         }
         compose.onNodeWithText("Layer 4  Rotating ID").assertExists()
+        compose.onNodeWithText("Reset or delete my advertising ID").assertExists()
     }
 
     @Test
